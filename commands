@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+case "$1" in
+  help | review-pg:help)
+    help_content_func() {
+      declare desc="return review-pg plugin help content"
+      cat <<EOF
+    review-pg:set <--global|app> <key> <value>, Set a review-pg property
+    review-pg:get <--global|app> <key>, Get a review-pg property
+    review-pg:report [app], Show review-pg configuration
+EOF
+    }
+    help_content_func
+    ;;
+
+  *)
+    exit "$DOKKU_NOT_IMPLEMENTED_EXIT"
+    ;;
+esac

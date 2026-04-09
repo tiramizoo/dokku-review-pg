@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/functions"
+source "$PLUGIN_CORE_AVAILABLE_PATH/common/property-functions"
+
+PLUGIN_NAME="review-pg"
+
+fn-review-pg-app-matches() {
+  declare APP="$1"
+  local PATTERN
+  PATTERN=$(fn-plugin-property-get "$PLUGIN_NAME" "--global" "app-pattern" "*")
+  # shellcheck disable=SC2053
+  [[ "$APP" == $PATTERN ]]
+}
+
+fn-review-pg-get-db-secret() {
+  fn-plugin-property-get "$PLUGIN_NAME" "--global" "db-secret" ""
+}
+
+fn-review-pg-get-databases() {
+  fn-plugin-property-get "$PLUGIN_NAME" "--global" "databases" "DATABASE_URL"
+}
+
+fn-review-pg-derive-password() {
+  declare SECRET="$1" APP="$2"
+  echo -n "${SECRET}:${APP}" | sha256sum | head -c 32
+}
+
+fn-review-pg-db-name() {
+  declare APP="$1" ENV_VAR="$2"
+  local SUFFIX
+  # DATABASE_URL → app name as-is; others → app name + suffix from env var name
+  if [[ "$ENV_VAR" == "DATABASE_URL" ]]; then
+    echo "${APP}" | tr '-' '_'
+  else
+    # TRACKING_DATABASE_URL → tracking
+    SUFFIX=$(echo "${ENV_VAR}" | sed 's/_DATABASE_URL$//' | tr '[:upper:]' '[:lower:]')
+    echo "$(echo "${APP}" | tr '-' '_')_${SUFFIX}"
+  fi
+}

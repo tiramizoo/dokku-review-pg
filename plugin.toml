@@ -1,0 +1,4 @@
+[plugin]
+description = "Provision and destroy PostgreSQL databases for Dokku apps using system PostgreSQL"
+version = "0.1.0"
+[plugin.config]

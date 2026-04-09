@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(dirname "$0")/functions"
+
+APP="$1"
+
+fn-review-pg-app-matches "$APP" || exit 0
+
+DB_SECRET=$(fn-review-pg-get-db-secret)
+if [[ -z "$DB_SECRET" ]]; then
+  echo "       review-pg: No db-secret configured, skipping. Set with: dokku review-pg:set --global db-secret <secret>"
+  exit 0
+fi
+
+DATABASES=$(fn-review-pg-get-databases)
+DB_USER=$(echo "${APP}" | tr '-' '_')
+DB_PASS=$(fn-review-pg-derive-password "$DB_SECRET" "$APP")
+
+echo "-----> review-pg: Provisioning PostgreSQL for ${APP}"
+
+# Create user
+sudo -u postgres psql -q <<SQL
+  DO \$\$ BEGIN
+    CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
+  EXCEPTION WHEN duplicate_object THEN
+    ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
+  END \$\$;
+SQL
+
+# Create each database and build config vars
+CONFIG_VARS=""
+for ENV_VAR in ${DATABASES}; do
+  DB_NAME=$(fn-review-pg-db-name "$APP" "$ENV_VAR")
+
+  sudo -u postgres psql -q <<SQL
+    SELECT 'CREATE DATABASE ${DB_NAME} OWNER ${DB_USER}'
+      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
+    REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;
+SQL
+
+  CONFIG_VARS="${CONFIG_VARS} ${ENV_VAR}=postgres://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
+  echo "       ${ENV_VAR} → ${DB_NAME}"
+done
+
+# Set all DATABASE_URLs on the app
+# shellcheck disable=SC2086
+dokku config:set --no-restart "$APP" $CONFIG_VARS

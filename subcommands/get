@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(dirname "$(dirname "$0")")/functions"
+
+APP_OR_GLOBAL="$2"
+KEY="$3"
+
+if [[ -z "$APP_OR_GLOBAL" ]] || [[ -z "$KEY" ]]; then
+  dokku_log_fail "Usage: dokku review-pg:get <--global|app> <key>"
+fi
+
+fn-plugin-property-get "$PLUGIN_NAME" "$APP_OR_GLOBAL" "$KEY" ""

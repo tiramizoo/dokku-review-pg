@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+source "$(dirname "$(dirname "$0")")/functions"
+
+echo "=====> review-pg global config"
+echo "       app-pattern: $(fn-plugin-property-get "$PLUGIN_NAME" "--global" "app-pattern" "*")"
+echo "       databases:   $(fn-plugin-property-get "$PLUGIN_NAME" "--global" "databases" "DATABASE_URL")"
+echo "       db-secret:   $(if [[ -n "$(fn-review-pg-get-db-secret)" ]]; then echo "[set]"; else echo "[not set]"; fi)"

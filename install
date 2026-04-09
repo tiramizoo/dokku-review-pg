@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PG_VERSION="${REVIEW_PG_VERSION:-18}"
+
+echo "-----> review-pg: Installing PostgreSQL ${PG_VERSION}"
+
+if command -v psql &>/dev/null && psql --version | grep -q "PostgreSQL ${PG_VERSION}"; then
+  echo "       PostgreSQL ${PG_VERSION} already installed: $(psql --version)"
+else
+  # Add official PostgreSQL apt repository
+  apt-get install -y -qq curl ca-certificates > /dev/null
+  install -d /usr/share/postgresql-common/pgdg
+  curl -so /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc
+
+  . /etc/os-release
+  echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+
+  apt-get update -qq
+  apt-get install -y -qq "postgresql-${PG_VERSION}" > /dev/null
+  echo "       Installed: $(psql --version)"
+fi
+
+# Ensure a cluster exists for the target version and is running on port 5432
+if ! pg_lsclusters -h | grep -q "^${PG_VERSION}.*main"; then
+  echo "-----> review-pg: Creating PostgreSQL ${PG_VERSION} cluster"
+  pg_createcluster "${PG_VERSION}" main --start --port 5432
+fi
+
+systemctl enable --now postgresql
+
+# Configure password authentication for local TCP connections (used by Dokku apps)
+PG_HBA=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+if ! grep -q "host all all 127.0.0.1/32 scram-sha-256" "$PG_HBA"; then
+  echo "-----> review-pg: Configuring pg_hba.conf for password auth on localhost"
+  sed -i '/^host.*all.*all.*127.0.0.1/d' "$PG_HBA"
+  echo "host all all 127.0.0.1/32 scram-sha-256" >> "$PG_HBA"
+  systemctl reload postgresql
+fi
+
+# Allow dokku user to run psql as postgres without a password
+echo "dokku ALL=(postgres) NOPASSWD: /usr/bin/psql" > /etc/sudoers.d/dokku-postgres
+chmod 440 /etc/sudoers.d/dokku-postgres
+
+echo "-----> review-pg: PostgreSQL ${PG_VERSION} ready"
