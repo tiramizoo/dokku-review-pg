@@ -17,8 +17,9 @@ fi
 DATABASES=$(fn-review-pg-get-databases)
 DB_USER=$(echo "${APP}" | tr '-' '_')
 DB_PASS=$(fn-review-pg-derive-password "$DB_SECRET" "$APP")
+HOST_IP=$(fn-review-pg-host-ip)
 
-echo "-----> review-pg: Provisioning PostgreSQL for ${APP}"
+echo "-----> review-pg: Provisioning PostgreSQL for ${APP} (host: ${HOST_IP})"
 
 # Create user
 sudo -u postgres psql -q <<SQL
@@ -40,7 +41,7 @@ for ENV_VAR in ${DATABASES}; do
     REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;
 SQL
 
-  CONFIG_VARS="${CONFIG_VARS} ${ENV_VAR}=postgres://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}"
+  CONFIG_VARS="${CONFIG_VARS} ${ENV_VAR}=postgres://${DB_USER}:${DB_PASS}@${HOST_IP}:5432/${DB_NAME}"
   echo "       ${ENV_VAR} → ${DB_NAME}"
 done
 

@@ -40,3 +40,11 @@ fn-review-pg-db-name() {
     echo "$(echo "${APP}" | tr '-' '_')_${SUFFIX}"
   fi
 }
+
+fn-review-pg-host-ip() {
+  # Detect the Docker bridge gateway IP — this is the IP containers use to reach the host.
+  # Falls back to 127.0.0.1 if detection fails (e.g. Docker not running).
+  local GW
+  GW=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)
+  echo "${GW:-127.0.0.1}"
+}

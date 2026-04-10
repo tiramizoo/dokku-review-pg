@@ -32,13 +32,42 @@ fi
 
 systemctl enable --now postgresql
 
-# Configure password authentication for local TCP connections (used by Dokku apps)
+# Detect Docker bridge gateway for container→host connectivity
+DOCKER_GW=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)
+DOCKER_SUBNET=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
+
+PG_CONF=$(sudo -u postgres psql -t -c "SHOW config_file;" | xargs)
 PG_HBA=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
+PG_CHANGED=false
+
+# Configure password authentication for local TCP connections (used by Dokku apps)
 if ! grep -q "host all all 127.0.0.1/32 scram-sha-256" "$PG_HBA"; then
   echo "-----> review-pg: Configuring pg_hba.conf for password auth on localhost"
   sed -i '/^host.*all.*all.*127.0.0.1/d' "$PG_HBA"
   echo "host all all 127.0.0.1/32 scram-sha-256" >> "$PG_HBA"
-  systemctl reload postgresql
+  PG_CHANGED=true
+fi
+
+# Configure PostgreSQL to listen on Docker bridge so containers can connect
+if [[ -n "$DOCKER_GW" ]]; then
+  echo "-----> review-pg: Configuring PostgreSQL for Docker networking (gateway: ${DOCKER_GW})"
+
+  # Add Docker subnet to pg_hba.conf
+  if [[ -n "$DOCKER_SUBNET" ]] && ! grep -q "$DOCKER_SUBNET" "$PG_HBA"; then
+    echo "host all all ${DOCKER_SUBNET} scram-sha-256" >> "$PG_HBA"
+    PG_CHANGED=true
+  fi
+
+  # Add Docker gateway to listen_addresses
+  CURRENT_LISTEN=$(sudo -u postgres psql -t -c "SHOW listen_addresses;" | xargs)
+  if [[ "$CURRENT_LISTEN" != *"$DOCKER_GW"* ]]; then
+    sed -i "s/^[#[:space:]]*listen_addresses = .*/listen_addresses = '${CURRENT_LISTEN},${DOCKER_GW}'/" "$PG_CONF"
+    PG_CHANGED=true
+  fi
+fi
+
+if [[ "$PG_CHANGED" == "true" ]]; then
+  systemctl restart postgresql
 fi
 
 # Allow dokku user to run psql as postgres without a password
