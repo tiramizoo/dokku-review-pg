@@ -41,6 +41,14 @@ for ENV_VAR in ${DATABASES}; do
     REVOKE ALL ON DATABASE ${DB_NAME} FROM PUBLIC;
 SQL
 
+  # Pre-create extensions as superuser so the app user doesn't need elevated privileges
+  EXTENSIONS=$(fn-review-pg-get-extensions)
+  if [[ -n "$EXTENSIONS" ]]; then
+    for EXT in ${EXTENSIONS}; do
+      sudo -u postgres psql -q -d "${DB_NAME}" -c "CREATE EXTENSION IF NOT EXISTS \"${EXT}\" CASCADE;" 2>/dev/null || true
+    done
+  fi
+
   CONFIG_VARS="${CONFIG_VARS} ${ENV_VAR}=postgres://${DB_USER}:${DB_PASS}@${HOST_IP}:5432/${DB_NAME}"
   echo "       ${ENV_VAR} → ${DB_NAME}"
 done

@@ -23,6 +23,10 @@ fn-review-pg-get-databases() {
   fn-plugin-property-get "$PLUGIN_NAME" "--global" "databases" "DATABASE_URL"
 }
 
+fn-review-pg-get-extensions() {
+  fn-plugin-property-get "$PLUGIN_NAME" "--global" "extensions" ""
+}
+
 fn-review-pg-derive-password() {
   declare SECRET="$1" APP="$2"
   echo -n "${SECRET}:${APP}" | sha256sum | head -c 32
