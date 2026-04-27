@@ -64,6 +64,20 @@ if [[ -n "$DOCKER_GW" ]]; then
     sed -i "s/^[#[:space:]]*listen_addresses = .*/listen_addresses = '${CURRENT_LISTEN},${DOCKER_GW}'/" "$PG_CONF"
     PG_CHANGED=true
   fi
+
+  # Order PostgreSQL after Docker on boot. Without this, systemd parallel-starts
+  # both services and Postgres can race past docker0 creation, fail to bind
+  # ${DOCKER_GW}, and silently fall back to 127.0.0.1 only — breaking app
+  # connectivity until the next manual restart (seen after AWS kernel reboots).
+  PG_OVERRIDE_DIR="/etc/systemd/system/postgresql@${PG_VERSION}-main.service.d"
+  PG_OVERRIDE_FILE="${PG_OVERRIDE_DIR}/10-docker-ordering.conf"
+  PG_OVERRIDE_CONTENT=$'[Unit]\nAfter=docker.service\nRequires=docker.service\n'
+  if [[ ! -f "$PG_OVERRIDE_FILE" ]] || [[ "$(cat "$PG_OVERRIDE_FILE")" != "$PG_OVERRIDE_CONTENT" ]]; then
+    echo "-----> review-pg: Installing systemd override to start PostgreSQL after Docker"
+    install -d "$PG_OVERRIDE_DIR"
+    printf '%s' "$PG_OVERRIDE_CONTENT" > "$PG_OVERRIDE_FILE"
+    systemctl daemon-reload
+  fi
 fi
 
 if [[ "$PG_CHANGED" == "true" ]]; then
