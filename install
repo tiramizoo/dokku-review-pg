@@ -6,7 +6,7 @@ PG_VERSION="${REVIEW_PG_VERSION:-18}"
 
 echo "-----> review-pg: Installing PostgreSQL ${PG_VERSION}"
 
-if command -v psql &>/dev/null && psql --version | grep -q "PostgreSQL ${PG_VERSION}"; then
+if dpkg-query -W -f='${Status}' "postgresql-${PG_VERSION}" 2>/dev/null | grep -q "install ok installed"; then
   echo "       PostgreSQL ${PG_VERSION} already installed: $(psql --version)"
 else
   # Add official PostgreSQL apt repository
