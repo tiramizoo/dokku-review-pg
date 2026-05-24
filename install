@@ -3,13 +3,23 @@ set -eo pipefail
 [[ $DOKKU_TRACE ]] && set -x
 
 PG_VERSION="${REVIEW_PG_VERSION:-18}"
+DATA_DIR=/var/lib/dokku/data/review-pg
+MARKER="${DATA_DIR}/.installed"
 
-echo "-----> review-pg: Installing PostgreSQL ${PG_VERSION}"
+# Dokku fires the `install` trigger across every installed plugin on each
+# `dokku plugin:install`, so without a short-circuit the configuration checks
+# below re-run (and re-print) on every subsequent plugin install. The marker
+# stores the configured PG_VERSION so version bumps invalidate it; deleting
+# the file forces a full reconfigure on the next run.
+if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "$PG_VERSION" ]]; then
+  exit 0
+fi
 
-if dpkg-query -W -f='${Status}' "postgresql-${PG_VERSION}" 2>/dev/null | grep -q "install ok installed"; then
-  echo "       PostgreSQL ${PG_VERSION} already installed: $(psql --version)"
-else
-  # Add official PostgreSQL apt repository
+# --- PostgreSQL package ---------------------------------------------------
+
+if ! dpkg-query -W -f='${Status}' "postgresql-${PG_VERSION}" 2>/dev/null | grep -q "install ok installed"; then
+  echo "-----> review-pg: Installing PostgreSQL ${PG_VERSION}"
+
   apt-get install -y -qq curl ca-certificates > /dev/null
   install -d /usr/share/postgresql-common/pgdg
   curl -so /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
@@ -24,15 +34,22 @@ else
   echo "       Installed: $(psql --version)"
 fi
 
-# Ensure a cluster exists for the target version and is running on port 5432
+# --- Cluster --------------------------------------------------------------
+
 if ! pg_lsclusters -h | grep -q "^${PG_VERSION}.*main"; then
   echo "-----> review-pg: Creating PostgreSQL ${PG_VERSION} cluster"
   pg_createcluster "${PG_VERSION}" main --start --port 5432
 fi
 
-systemctl enable --now postgresql
+# --- Service --------------------------------------------------------------
 
-# Detect Docker bridge gateway for container→host connectivity
+if ! systemctl is-enabled --quiet postgresql 2>/dev/null \
+   || ! systemctl is-active --quiet postgresql 2>/dev/null; then
+  systemctl enable --now postgresql
+fi
+
+# --- Configuration --------------------------------------------------------
+
 DOCKER_GW=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)
 DOCKER_SUBNET=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)
 
@@ -40,7 +57,7 @@ PG_CONF=$(sudo -u postgres psql -t -c "SHOW config_file;" | xargs)
 PG_HBA=$(sudo -u postgres psql -t -c "SHOW hba_file;" | xargs)
 PG_CHANGED=false
 
-# Configure password authentication for local TCP connections (used by Dokku apps)
+# Password authentication for local TCP connections (used by Dokku apps)
 if ! grep -q "host all all 127.0.0.1/32 scram-sha-256" "$PG_HBA"; then
   echo "-----> review-pg: Configuring pg_hba.conf for password auth on localhost"
   sed -i '/^host.*all.*all.*127.0.0.1/d' "$PG_HBA"
@@ -48,20 +65,23 @@ if ! grep -q "host all all 127.0.0.1/32 scram-sha-256" "$PG_HBA"; then
   PG_CHANGED=true
 fi
 
-# Configure PostgreSQL to listen on Docker bridge so containers can connect
+# PostgreSQL listens on Docker bridge so containers can connect
 if [[ -n "$DOCKER_GW" ]]; then
-  echo "-----> review-pg: Configuring PostgreSQL for Docker networking (gateway: ${DOCKER_GW})"
+  DOCKER_CHANGED=false
 
-  # Add Docker subnet to pg_hba.conf
   if [[ -n "$DOCKER_SUBNET" ]] && ! grep -q "$DOCKER_SUBNET" "$PG_HBA"; then
     echo "host all all ${DOCKER_SUBNET} scram-sha-256" >> "$PG_HBA"
-    PG_CHANGED=true
+    DOCKER_CHANGED=true
   fi
 
-  # Add Docker gateway to listen_addresses
   CURRENT_LISTEN=$(sudo -u postgres psql -t -c "SHOW listen_addresses;" | xargs)
   if [[ "$CURRENT_LISTEN" != *"$DOCKER_GW"* ]]; then
     sed -i "s/^[#[:space:]]*listen_addresses = .*/listen_addresses = '${CURRENT_LISTEN},${DOCKER_GW}'/" "$PG_CONF"
+    DOCKER_CHANGED=true
+  fi
+
+  if [[ "$DOCKER_CHANGED" == "true" ]]; then
+    echo "-----> review-pg: Configured PostgreSQL for Docker networking (gateway: ${DOCKER_GW})"
     PG_CHANGED=true
   fi
 
@@ -84,8 +104,19 @@ if [[ "$PG_CHANGED" == "true" ]]; then
   systemctl restart postgresql
 fi
 
+# --- Sudoers --------------------------------------------------------------
+
 # Allow dokku user to run psql as postgres without a password
-echo "dokku ALL=(postgres) NOPASSWD: /usr/bin/psql" > /etc/sudoers.d/dokku-postgres
-chmod 440 /etc/sudoers.d/dokku-postgres
+SUDOERS_CONTENT="dokku ALL=(postgres) NOPASSWD: /usr/bin/psql"
+SUDOERS_FILE=/etc/sudoers.d/dokku-postgres
+if [[ ! -f "$SUDOERS_FILE" ]] || [[ "$(cat "$SUDOERS_FILE")" != "$SUDOERS_CONTENT" ]]; then
+  echo "$SUDOERS_CONTENT" > "$SUDOERS_FILE"
+  chmod 440 "$SUDOERS_FILE"
+fi
+
+# --- Done -----------------------------------------------------------------
+
+install -d "$DATA_DIR"
+echo "$PG_VERSION" > "$MARKER"
 
 echo "-----> review-pg: PostgreSQL ${PG_VERSION} ready"
