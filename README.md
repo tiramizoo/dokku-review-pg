@@ -140,6 +140,25 @@ dokku review-pg:report                              # Show configuration
 sudo dokku plugin:update review-pg
 ```
 
+## Upgrading PostgreSQL major versions
+
+The plugin does not auto-migrate data when `REVIEW_PG_VERSION` changes. If a `main` cluster already exists at a different major version, the install hook refuses with an error rather than silently leaving you with an empty new cluster.
+
+To upgrade in place (e.g. 17 → 18):
+
+```bash
+sudo systemctl stop postgresql
+sudo apt-get install postgresql-18
+sudo pg_upgradecluster 17 main
+sudo pg_dropcluster 17 main --stop
+sudo rm /var/lib/dokku/data/review-pg/.installed
+sudo REVIEW_PG_VERSION=18 dokku plugin:update review-pg
+```
+
+**Take a backup first.** `pg_upgradecluster` uses `pg_upgrade` under the hood and is robust, but in-place migrations can fail in ways that leave the cluster unrecoverable without one.
+
+Downgrades are not supported — PostgreSQL data files are forward-compatible only. To move to an older major, dump from the running cluster, drop it, install the older version, and restore.
+
 ## Debugging
 
 Enable Dokku trace to see detailed plugin execution:

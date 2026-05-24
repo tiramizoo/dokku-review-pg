@@ -15,6 +15,46 @@ if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "$PG_VERSION" ]]; then
   exit 0
 fi
 
+# --- Version mismatch guard -----------------------------------------------
+#
+# If a `main` cluster already exists at a different major version, refuse
+# rather than apt-installing the new packages and failing mid-script on
+# pg_createcluster (port 5432 conflict). PostgreSQL data files are not
+# downgrade-compatible; upgrades require pg_upgradecluster. See README.
+
+EXISTING_VERSION=$(pg_lsclusters -h 2>/dev/null \
+  | awk '$2 == "main" { print $1 }' \
+  | sort -n \
+  | tail -1)
+
+if [[ -n "$EXISTING_VERSION" ]] && [[ "$EXISTING_VERSION" != "$PG_VERSION" ]]; then
+  if (( EXISTING_VERSION < PG_VERSION )); then
+    cat >&2 <<EOF
+ERROR: PostgreSQL ${EXISTING_VERSION} is installed; requested ${PG_VERSION} (upgrade).
+
+This plugin does not migrate data automatically. To upgrade in place:
+
+  sudo systemctl stop postgresql
+  sudo apt-get install postgresql-${PG_VERSION}
+  sudo pg_upgradecluster ${EXISTING_VERSION} main
+  sudo pg_dropcluster ${EXISTING_VERSION} main --stop
+  sudo rm ${MARKER}
+  sudo dokku plugin:update review-pg
+
+Take a backup first.
+EOF
+  else
+    cat >&2 <<EOF
+ERROR: PostgreSQL ${EXISTING_VERSION} is installed; requested ${PG_VERSION} (downgrade).
+
+PostgreSQL data files are forward-compatible only. To move to an older
+major you must dump from the running cluster, drop it, install the older
+version, and restore. There is no in-place downgrade.
+EOF
+  fi
+  exit 1
+fi
+
 # --- PostgreSQL package ---------------------------------------------------
 
 if ! dpkg-query -W -f='${Status}' "postgresql-${PG_VERSION}" 2>/dev/null | grep -q "install ok installed"; then
