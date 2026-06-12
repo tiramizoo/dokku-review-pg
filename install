@@ -108,7 +108,7 @@ fi
 
 # Allow dokku user to run psql as postgres without a password
 SUDOERS_CONTENT="dokku ALL=(postgres) NOPASSWD: /usr/bin/psql"
-SUDOERS_FILE=/etc/sudoers.d/dokku-postgres
+SUDOERS_FILE=/etc/sudoers.d/dokku-review-pg
 if [[ ! -f "$SUDOERS_FILE" ]] || [[ "$(cat "$SUDOERS_FILE")" != "$SUDOERS_CONTENT" ]]; then
   echo "$SUDOERS_CONTENT" > "$SUDOERS_FILE"
   chmod 440 "$SUDOERS_FILE"
