@@ -8,13 +8,17 @@ APP="$1"
 
 fn-review-pg-app-matches "$APP" || exit 0
 
-DATABASES=$(fn-review-pg-get-databases)
 DB_USER=$(echo "${APP}" | tr '-' '_')
 
 echo "-----> review-pg: Dropping PostgreSQL resources for ${APP}"
 
-for ENV_VAR in ${DATABASES}; do
-  DB_NAME=$(fn-review-pg-db-name "$APP" "$ENV_VAR")
+# Drop every database owned by this app's role — covers DBs created under an
+# earlier 'databases' config that is no longer set (e.g. tracking DBs). Relying
+# on ownership rather than current config prevents config changes from orphaning
+# databases and blocking the role drop below.
+OWNED_DBS=$(sudo -u postgres psql -tAc \
+  "SELECT datname FROM pg_database d JOIN pg_roles r ON d.datdba = r.oid WHERE r.rolname = '${DB_USER}';")
+for DB_NAME in ${OWNED_DBS}; do
   sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS ${DB_NAME};"
   echo "       Dropped database: ${DB_NAME}"
 done
