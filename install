@@ -96,7 +96,7 @@ if [[ -n "$DOCKER_GW" ]]; then
   PG_OVERRIDE_DIR="/etc/systemd/system/postgresql@${PG_VERSION}-main.service.d"
   PG_OVERRIDE_FILE="${PG_OVERRIDE_DIR}/10-docker-ordering.conf"
   PG_OVERRIDE_CONTENT=$'[Unit]\nAfter=docker.service\nRequires=docker.service\n'
-  if [[ ! -f "$PG_OVERRIDE_FILE" ]] || [[ "$(cat "$PG_OVERRIDE_FILE")" != "$PG_OVERRIDE_CONTENT" ]]; then
+  if ! printf '%s' "$PG_OVERRIDE_CONTENT" | cmp -s - "$PG_OVERRIDE_FILE"; then
     echo "-----> review-pg: Installing systemd override to start PostgreSQL after Docker"
     install -d "$PG_OVERRIDE_DIR"
     printf '%s' "$PG_OVERRIDE_CONTENT" > "$PG_OVERRIDE_FILE"
