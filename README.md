@@ -11,7 +11,7 @@ Supports Rails [multiple databases](https://guides.rubyonrails.org/active_record
 - Dokku 0.35+
 - Ubuntu 22.04 or 24.04
 
-PostgreSQL is installed automatically by the plugin (default: PostgreSQL 18 from the official PGDG repository).
+PostgreSQL is installed automatically by the plugin (default: PostgreSQL 18 from the official PGDG repository). The plugin also adds `pg_stat_statements` to `shared_preload_libraries`, so query statistics are collected once the extension is created in a database.
 
 ## Installation
 

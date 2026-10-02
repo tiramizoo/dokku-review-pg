@@ -5,13 +5,17 @@ set -eo pipefail
 PG_VERSION="${REVIEW_PG_VERSION:-18}"
 DATA_DIR=/var/lib/dokku/data/review-pg
 MARKER="${DATA_DIR}/.installed"
+# Bump when the configuration below changes, so existing servers re-run it.
+CONFIG_REVISION=2
+MARKER_CONTENT="${PG_VERSION}:${CONFIG_REVISION}"
 
 # Dokku fires the `install` trigger across every installed plugin on each
 # `dokku plugin:install`, so without a short-circuit the configuration checks
 # below re-run (and re-print) on every subsequent plugin install. The marker
-# stores the configured PG_VERSION so version bumps invalidate it; deleting
-# the file forces a full reconfigure on the next run.
-if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "$PG_VERSION" ]]; then
+# stores the configured PG_VERSION and CONFIG_REVISION so version bumps and
+# configuration changes invalidate it; deleting the file forces a full
+# reconfigure on the next run.
+if [[ -f "$MARKER" ]] && [[ "$(cat "$MARKER")" == "$MARKER_CONTENT" ]]; then
   exit 0
 fi
 
@@ -100,6 +104,16 @@ if [[ -n "$DOCKER_GW" ]]; then
   fi
 fi
 
+# Load pg_stat_statements so query statistics are collected. Creating the
+# extension in a database is not enough — the module has to be preloaded at
+# server start. ALTER SYSTEM keeps any libraries already configured.
+PRELOAD=$(sudo -u postgres psql -tA -c "SHOW shared_preload_libraries;")
+if [[ ",${PRELOAD// /}," != *",pg_stat_statements,"* ]]; then
+  echo "-----> review-pg: Preloading pg_stat_statements"
+  sudo -u postgres psql -q -c "ALTER SYSTEM SET shared_preload_libraries = '${PRELOAD:+${PRELOAD},}pg_stat_statements';"
+  PG_CHANGED=true
+fi
+
 if [[ "$PG_CHANGED" == "true" ]]; then
   systemctl restart postgresql
 fi
@@ -117,6 +131,6 @@ fi
 # --- Done -----------------------------------------------------------------
 
 install -d "$DATA_DIR"
-echo "$PG_VERSION" > "$MARKER"
+echo "$MARKER_CONTENT" > "$MARKER"
 
 echo "-----> review-pg: PostgreSQL ${PG_VERSION} ready"
